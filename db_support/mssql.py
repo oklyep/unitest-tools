@@ -15,12 +15,11 @@ class Mssql(DBTools):
         super(Mssql, self).__init__(db_config)
         self.db_files_dir = db_config.mssql_db_dir
         self.backup_path = '{}\\{}.bak'.format(db_config.backup_dir, self.name)
+        self.port = int(self.port)
 
     def _run_sql(self, sql, timeout, connect_to_current_db=True, non_query=True, ignore_errors=False):
         log.debug('Run sql. Server %s, timeout %s, query %s', self.addr, timeout, sql)
 
-        if not self.port:
-            self.port = 1433
         kw = {'server': self.addr,
               'user': self.user,
               'password': self.password,

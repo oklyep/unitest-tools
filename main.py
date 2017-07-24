@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-
-import logging
-import logging.config
 import signal
 
 from tornado.ioloop import IOLoop
@@ -14,9 +11,7 @@ from web_handlers import ActionHandler, MainPageHandler, AdminPageHandler
 
 def main():
     conf = RootConfig()
-    logging.config.dictConfig(conf.default_logging())
     conf.make_config()
-
     application = Application([
         (r'/', MainPageHandler),
         (r'/admin/*', AdminPageHandler),
@@ -27,7 +22,7 @@ def main():
     application.engine = engine
 
     def exit_handler(signum, frame):
-        engine._exit()
+        engine.exit()
         IOLoop.instance().stop()
 
     # Обработка сигнала завершения контейнера и завершения с консоли

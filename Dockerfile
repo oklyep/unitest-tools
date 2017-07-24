@@ -17,6 +17,7 @@ RUN pip3 install --upgrade pip \
  docker-py==1.10 \
  jenkinsapi==0.3 \
  pymssql==2.1 \
+ pytz \
  python-magic \
  tornado==4.5
 

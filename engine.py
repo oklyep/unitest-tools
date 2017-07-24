@@ -1,4 +1,5 @@
 import logging
+import time
 import os
 import shutil
 import subprocess
@@ -37,15 +38,16 @@ class Engine(object):
 
         else:
             raise RuntimeError('Unsupported database type')
+        self._write_hibernate_properties()
 
         self.jenkins = Jenkins(config.jenkins)
 
         os.environ['CATALINA_OPTS'] = config.catalina_opts
-        self.tomcat = subprocess.Popen([self.config.CATALINA_SH, "run"])
-
+        self.tomcat = None
         self.last_error = None
         self.active_task = None
         self.last_task = None
+
         log.info('Test tools started')
 
     def _create_dirs(self):
@@ -87,7 +89,7 @@ class Engine(object):
                     build_details),
             ])
 
-    def _exit(self):
+    def exit(self):
         log.info('Shutdown...')
         self.stop_tomcat()
         if self.config.db.rm:
@@ -98,19 +100,24 @@ class Engine(object):
 
     def start_tomcat(self):
         log.info('start tomcat')
-        self.tomcat.poll()
-        if self.tomcat.returncode:
-            self.tomcat = subprocess.Popen([self.config.CATALINA_SH, "run"])
+        # Если процесс существует и запущен - то не делать ничего
+        if self.tomcat is not None and self.tomcat.poll() is None:
+            return
+
+        self.tomcat = subprocess.Popen([self.config.CATALINA_SH, "run"])
+        # Иначе кто-то может остановить томкат сразу после запуска, что вызовет рождение зомби uname, dirname, tty
+        time.sleep(2)
 
     def stop_tomcat(self):
         log.info('stop tomcat')
-        self.tomcat.poll()
-        if not self.tomcat.returncode:
-            try:
-                self.tomcat.terminate()
-                self.tomcat.wait(30)
-            except subprocess.TimeoutExpired:
-                self.tomcat.kill()
+        # Если процесс не существует или уже остановлен - то не делать ничего
+        if self.tomcat is None or self.tomcat.poll() is not None:
+            return
+        try:
+            self.tomcat.terminate()
+            self.tomcat.wait(30)
+        except subprocess.TimeoutExpired:
+            self.tomcat.kill()
 
     def log_exceptions(self, runnable):
         try:
@@ -133,23 +140,22 @@ class Engine(object):
             log.info("Task finished")
 
     def engine_status(self):
-        self.tomcat.poll()
+        if self.tomcat is not None:
+            returncode = self.tomcat.poll()
+        else:
+            returncode = 0
+
+        with open(self.config.UNI_VERSION_FILE, 'rt') as f:
+            uni_version = f.read()
+
         return {
             "last_error": self.last_error,
             "last_task": self.last_task,
             "active_task": self.active_task,
             "db_addr": self.db.addr,
-            "tomcat_returncode": self.tomcat.returncode
+            "tomcat_returncode": returncode,
+            'uni_version': uni_version,
         }
-
-    def new_stand(self):
-        self.new_db()
-        # если директория сборки пуста, надо загрузить с дженкинса, если файлы есть достаточно запустить томкат
-        if not os.listdir(self.config.UNI_WEBAPP):
-            self.update()
-        else:
-            self.stop_tomcat()
-            self.start_tomcat()
 
     def new_db(self):
         self.stop_tomcat()
@@ -159,7 +165,6 @@ class Engine(object):
         # если есть бэкап - восстанавливаем, иначе будет создана пустая база при первом запуске
         if self.db.has_default_backup():
             self.restore()
-        self.start_tomcat()
 
     def drop_db(self):
         self.stop_tomcat()
@@ -171,20 +176,17 @@ class Engine(object):
         with self._new_task(Engine.RESTORE_DB):
             self.db.restore()
             self.db.set_1_1()
-        self.start_tomcat()
 
     def backup(self):
         self.stop_tomcat()
         with self._new_task(Engine.BACKUP_DB):
             self.db.backup()
-        self.start_tomcat()
 
     def reduce(self):
         self.stop_tomcat()
         with self._new_task(Engine.REDUCE_DB):
             self.db.reduce()
             self.db.customer_patch()
-        self.start_tomcat()
 
     def update(self, build=None):
         self.stop_tomcat()

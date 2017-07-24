@@ -35,7 +35,12 @@ class Postgres(DBTools):
         os.putenv('PGPASSWORD', self.password)
         process = subprocess.Popen(args=args,
                                    stderr=subprocess.PIPE, stdout=subprocess.PIPE, stdin=stdin)
-        out, err = process.communicate(timeout=timeout)
+        try:
+            out, err = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            process.kill()
+            raise e
+
         if process.returncode != 0:
             log.debug(' '.join(args))
             # Чтобы ошибки восстановления не засирали лог вывводим первые 1000 символов

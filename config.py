@@ -1,5 +1,6 @@
 import json
 import logging
+import logging.config
 import os
 
 from db_support.mssql import Mssql
@@ -29,14 +30,14 @@ class ConfigObject(object):
             if isinstance(val, ConfigObject):
                 continue
 
-            env_param = '_'.join((self.CONF_NAME, key))
+            env_param = key if not self.CONF_NAME else '_'.join((self.CONF_NAME, key))
             if env_param in os.environ:
                 self.__dict__[key] = os.environ[env_param]
 
     def _assert_and_log(self):
         for key, val in self.__dict__.items():
             if key != 'password':
-                log.info('Section %s_%s=%s', self.CONF_NAME, key, val)
+                log.info('Section %s=%s', key if not self.CONF_NAME else '_'.join((self.CONF_NAME, key)), val)
             if val == ConfigObject.UNDEFINED:
                 raise RuntimeError('Param %s_%s required' % (self.CONF_NAME, key))
 
@@ -50,6 +51,7 @@ class RootConfig(ConfigObject):
     ENVIRONMENT_CONFIG = os.path.join(os.path.dirname(__file__), 'config_files', 'environment.json')
     CUSTOM_CONFIG = os.path.join(WORK_DIR, 'stand_config.json')
     CATALINA_SH = "catalina.sh"
+    CATALINA_LOGS = '/usr/local/tomcat/logs/'
 
     UNI_TEMPLATES = os.path.join(os.path.dirname(__file__), 'config_files', 'uni')
     UNI_TEMPLATE_POSTGRES = os.path.join(UNI_TEMPLATES, 'postgres_hibernate.properties')
@@ -66,10 +68,10 @@ class RootConfig(ConfigObject):
     UNI_DEBUG_PORT = 8081
 
     def __init__(self):
-        self.log_level = logging.INFO
+        self.log_level = 'INFO'
         self.db_type = Pgdocker.DB_TYPE
-        self.catalina_opts = "-Dapp.install.path={} -Xmx1500m -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=8180".format(
-                RootConfig.WORK_DIR)
+        self.catalina_opts = "-Dapp.install.path={} -Xmx1500m -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address={}".format(
+                RootConfig.WORK_DIR, str(RootConfig.UNI_DEBUG_PORT))
 
         self.jenkins = JenkinsConfig()
         self.db = DBConfig(Pgdocker.DB_TYPE)
@@ -80,15 +82,17 @@ class RootConfig(ConfigObject):
         Переменные среды >  environment.json > умолчания в классе
         :return:
         """
-        log.info('Test tools config loading...')
 
         # Загружаем дефолтные параметры текущего окружения
         with open(RootConfig.ENVIRONMENT_CONFIG, 'rt') as f:
             environment_config = json.load(f)
 
-        # сначала нужно определить тип базы поэтому первым делом подгружаем корневые параметры
+        # сначала нужно определить тип базы и уровень логирования поэтому первым делом подгружаем корневые параметры
         self._update_from_dict(environment_config[RootConfig.CONF_NAME])
         self._update_from_env()
+        # теперь можно сконфигурировать логи
+        logging.config.dictConfig(self.default_logging())
+        # и после писать лог
         self._assert_and_log()
 
         # Определяем дефолтные параметры бд (для используемого типа)
@@ -157,14 +161,14 @@ class DBConfig(ConfigObject):
         if db_type == Mssql.DB_TYPE:
             # директория на сервере mssql куда складывать базы (должна существовать)
             self.mssql_db_dir = ConfigObject.UNDEFINED
-            self.port = 1433
+            self.port = '1433'
 
         if db_type in (Pgdocker.DB_TYPE, Postgres.DB_TYPE):
             self.backup_dir = os.path.join(RootConfig.WORK_DIR, 'backup')
             self.postgres_ignore_restore_errors = True
 
         if db_type == Postgres.DB_TYPE:
-            self.port = 5432
+            self.port = '5432'
 
         if db_type == Pgdocker.DB_TYPE:
             # адрес докера в сети контейнеров по умолчанию
@@ -178,7 +182,7 @@ class DBConfig(ConfigObject):
             # задается при создании контейнера
             self.password = 'postgres'
             # образ базы данных
-            self.pgdocker_image = 'postgres'
+            self.pgdocker_image = 'tandemservice/postgres'
 
 
 class JenkinsConfig(ConfigObject):

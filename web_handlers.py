@@ -15,8 +15,9 @@ log = logging.getLogger('[test tools main]')
 class ActionHandler(RequestHandler):
     ENGINE_STATUS = 'engine_status'
     LONG_ACTIONS = ('update', 'reduce', 'backup', 'restore', 'build_and_update',
-                    'new_stand', 'new_db', 'drop_db')
+                    'new_db', 'drop_db')
     CHECK_UNI_ACTION = 'check_uni'
+    TOMCAT = ('start_tomcat', 'stop_tomcat')
     # использую внутреннюю очередь tpe чтобы в любой момент времени выполнялась только одна длинная задача
     # т. е. один поток на выполнение длинных задач. Нельзя выполнять параллельно
     TPE = ThreadPoolExecutor(max_workers=1)
@@ -50,6 +51,8 @@ class ActionHandler(RequestHandler):
         ?sync=1 -> html response только после завершения запроса. Если в очереди много задач будет ждать их
         полного выполения. Вернет стасус выполнения задачи после завершения.
         """
+        engine = self.application.engine
+
         if action == self.CHECK_UNI_ACTION:
             yield self._check_uni()
             return
@@ -57,24 +60,29 @@ class ActionHandler(RequestHandler):
         if action in self.LONG_ACTIONS:
             log.info('New task: %s', action)
             sync = self.get_argument('sync', False)
+
             if sync:
-                try:
-                    yield self.TPE.submit(getattr(self.application.engine, action))
+                yield self.TPE.submit(engine.log_exceptions, getattr(engine, action))
+
+                if not self.application.engine.last_error:
                     self.finish({'status': 'ok'})
-                except Exception as e:
-                    log.exception(e)
+                else:
                     self.set_status(400, 'Error while test tools action')
-                    self.finish({'status': 'fail', 'error': str(e)})
+                    self.finish({'status': 'fail', 'error': engine.last_error})
                 return
 
             if not sync:
-                self.TPE.submit(self.application.engine.log_exceptions, getattr(self.application.engine, action))
-                time.sleep(0.5)  # чтобы задача успела начаться, и показать ее статус
-                self.redirect('/')
+                self.TPE.submit(engine.log_exceptions, getattr(engine, action))
+                self.finish('Task added')
                 return
 
         if action == self.ENGINE_STATUS:
-            self.finish(getattr(self.application.engine, action)())
+            self.finish(engine.engine_status())
+            return
+
+        if action in self.TOMCAT:
+            getattr(engine, action)()
+            self.redirect('/')
             return
 
         self.set_status(404, 'invalid action')

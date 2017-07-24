@@ -8,8 +8,8 @@ class DBTools(object):
         self.user = db_config.user
         self.password = db_config.password
 
-        self.backup_timeout = 3600
-        self.restore_timeout = 10800
+        self.backup_timeout = 7200
+        self.restore_timeout = 18000
         self.quick_operation_timeout = 120
         self.middle_operation_timeout = 1200
 

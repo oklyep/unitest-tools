@@ -19,18 +19,17 @@ class Pgdocker(Postgres):
         super(Pgdocker, self).__init__(db_config)
 
         self.image = db_config.pgdocker_image
-        self.docker = Client("unix:///var/run/docker.sock")
+        self.docker = Client("unix:///var/run/docker.sock", timeout=1800)
         self.backup_path = os.path.join(db_config.backup_dir, 'default.tar')
-        self._container_name = db_config.container
 
         # пытаемся прочесть конфиг оставшийся с последнего запуска
-        self._container_file = os.path.join(db_config.backup_dir, 'pgdocker_db')
+        self._container_file = 'pgdocker_db'
         try:
             with open(self._container_file, 'rt') as f:
                 container_name, port = f.read().split(' ')
         except(FileNotFoundError, ValueError):
             # это новый контейнер
-            log.info('No db')
+            log.info('New container')
             container_name = ''
             port = random.randint(40000, 50000)
 
@@ -38,7 +37,7 @@ class Pgdocker(Postgres):
         self.port = str(db_config.port or port)
 
         try:
-            self._start(container_name)
+            self._start(self._container_name)
         except (NotFound, NullResource):
             # NotFound - этого контейнера больше нет на этом хосте
             # NullResource - база была удалена
@@ -71,10 +70,10 @@ class Pgdocker(Postgres):
         # Сразу после поднятия psql: FATAL:  the database system is starting up
         for i in range(0, 15):
             try:
-                super(Pgdocker, self)._run_console_command(['psql', '--list'], 1)
+                super(Pgdocker, self)._run_console_command(['psql', '--list'], 5)
                 return
 
-            except (ConnectionRefusedError, RuntimeError, TimeoutError):
+            except (ConnectionRefusedError, RuntimeError, subprocess.TimeoutExpired):
                 time.sleep(2)
 
         raise TimeoutError('Pgdocker was not started')
@@ -109,7 +108,10 @@ class Pgdocker(Postgres):
         self.docker.wait(self._container_name)
         with open(self.backup_path, "wb") as f:
             (stream, stat) = self.docker.get_archive(self._container_name, "/var/lib/postgresql/data/.")
-            f.write(stream.read())
+            buffer = stream.read(10000000)
+            while buffer:
+                f.write(buffer)
+                buffer = stream.read(10000000)
         self._start(self._container_name)
 
     def restore(self):
@@ -121,7 +123,7 @@ class Pgdocker(Postgres):
             log.info('Restore filesystem backup for container %s on server %s', self._container_name, self.addr)
             # Сначала сдедует почистить текущие файлы базы данных, для этого удаляем контейнер вместе с томом бд
             # Кроме того, при копировании бэкапа права установятся в root но видимо перепишутся при первом запуске контейнера
-            self.drop()
+            self._remove(self._container_name)
             new_container_id = self._create_container()
             with open(self.backup_path, "rb") as f:
                 self.docker.put_archive(new_container_id, "/var/lib/postgresql/data", f)
@@ -129,3 +131,4 @@ class Pgdocker(Postgres):
             self._save_container(new_container_id)
         else:
             super(Pgdocker, self).restore()
+

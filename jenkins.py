@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 import zipfile
+import pytz
 
 import jenkinsapi
 
@@ -107,6 +108,7 @@ class Jenkins:
             f.extractall(path=dir_for_files)
             f.close()
 
-            build_date = build.get_timestamp().strftime('%d.%m.%Y %H:%M')
-            build_details = '{0} jenkins build: {1}'.format(build_date, build_number)
-            return build_details
+            build_ts = build.get_timestamp()
+            local_datetime_string = build_ts.replace(tzinfo=pytz.utc).astimezone(pytz.timezone('Asia/Yekaterinburg')) \
+                .strftime('%d.%m.%Y %H:%M')
+            return '{0} build {1}'.format(local_datetime_string, build_number)

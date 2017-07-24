@@ -5,7 +5,7 @@
 Как запустить:
 1. Из директории этого файла (не забудь точку в конце):
 docker build -t test-tools .
-docker build -t postgres config_files/docker/postgres
+docker build -t tandemservice/postgres config_files/docker/postgres
 
 2. Из любой пустой (будут созданы файлы) директории:
 docker run --rm --volume $(pwd):/usr/local/test_tools_data --volume /var/run/docker.sock:/var/run/docker.sock \
